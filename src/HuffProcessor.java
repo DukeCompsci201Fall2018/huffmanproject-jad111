@@ -1,3 +1,4 @@
+import java.util.PriorityQueue;
 
 /**
  * Although this class has a history of several years,
@@ -32,7 +33,167 @@ public class HuffProcessor {
 		myDebugLevel = debug;
 	}
 	
-	public void readCompressedBits(HuffNode root, BitInputStream in, BitOutputStream out) {
+	
+	
+	/**
+	 * Compresses a file. Process must be reversible and loss-less.
+	 *
+	 * @param in
+	 *            Buffered bit stream of the file to be compressed.
+	 * @param out
+	 *            Buffered bit stream writing to the output file.
+	 */
+	public void compress(BitInputStream in, BitOutputStream out){
+
+		int[] counts = readForCounts(in);
+		HuffNode root = makeTreeFromCounts(counts);
+		String[] codings = makeCodingsFromTree(root);
+		
+		out.writeBits(BITS_PER_INT, HUFF_TREE);
+		writeHeader(root, out);
+		
+		in.reset();
+		writeCompressedBits(codings, in, out);
+		
+		out.close();
+	}
+	
+	private void writeCompressedBits(String[] codings, BitInputStream in, BitOutputStream out) {
+		int bits = in.readBits(BITS_PER_WORD);
+		String code;
+		while (bits != -1) {
+			code = codings[bits];
+			out.writeBits(code.length(), Integer.parseInt(code, 2));
+			bits = in.readBits(BITS_PER_WORD);
+		}
+		code = codings[PSEUDO_EOF];
+	    out.writeBits(code.length(), Integer.parseInt(code,2));
+
+	}
+	
+	/**
+	 * Write header which represents a trie
+	 * @param root
+	 * 				the root of a trie
+	 * @param out
+	 * 				Buffered bit stream writing to the output file.
+	 */
+	private void writeHeader(HuffNode root, BitOutputStream out) {
+		if (root.myLeft == null && root.myRight == null) {
+			out.write(1);
+			out.writeBits(BITS_PER_WORD + 1, root.myValue);
+		}
+		else {
+			out.write(0);
+			writeHeader(root.myLeft, out);
+			writeHeader(root.myRight, out);
+		}
+		
+	}
+	
+	
+	
+	/**
+	 * Creates an array of encodings where the index is the char as an int
+	 * @param root
+	 * 				the root of a trie
+	 * @return
+	 * 				an array of encodings
+	 */
+	private String[] makeCodingsFromTree(HuffNode root) {
+		String[] encodings = new String[ALPH_SIZE + 1];
+		encodeTransversal(root,"",encodings);
+		return encodings;
+	}
+
+	
+	private void encodeTransversal(HuffNode root, String string, String[] encodings) {
+		if (root.myLeft == null && root.myRight == null) {
+			encodings[root.myValue] = string;
+		}
+		else {
+			encodeTransversal(root.myLeft, string + "0", encodings);
+			encodeTransversal(root.myRight, string + "1", encodings);
+		}
+		
+	}
+
+	/**
+	 * Create a trie from the frequency of characters.
+	 * @param counts
+	 * 					an array of the frequency of each character
+	 * @return
+	 * 					the head of the trie
+	 */
+	private HuffNode makeTreeFromCounts(int[] counts) {
+		PriorityQueue<HuffNode> pq = new PriorityQueue<>();
+
+
+		for(int i = 0; i < counts.length; i++) {
+			if (counts[i] != 0) {
+				pq.add(new HuffNode(i, counts[i], null, null));
+			}
+		}
+
+		while (pq.size() > 1) {
+		    HuffNode left = pq.remove();
+		    HuffNode right = pq.remove();
+		    HuffNode t = new HuffNode(0, left.myWeight + right.myWeight, left, right);
+		    pq.add(t);
+		}
+		HuffNode root = pq.remove();
+
+		return root;
+	}
+
+	/**
+	 * Reads the file and creates a array that stores the frequencies of each character.
+	 * @param in
+	 * 				Buffered bit stream of the file to be compressed.
+	 * @return
+	 * 				The frequency array
+	 */
+	private int[] readForCounts(BitInputStream in) {
+		int[] freq = new int[ALPH_SIZE + 1];
+		freq[PSEUDO_EOF] = 1;
+		int currentChar = in.readBits(BITS_PER_WORD);
+		while (currentChar != -1) {
+			freq[currentChar] += 1;
+			currentChar = in.readBits(BITS_PER_WORD);
+		}
+		return freq;
+	}
+
+	/**
+	 * Decompresses a file. Output file must be identical bit-by-bit to the
+	 * original.
+	 *
+	 * @param in
+	 *            Buffered bit stream of the file to be decompressed.
+	 * @param out
+	 *            Buffered bit stream writing to the output file.
+	 */
+	public void decompress(BitInputStream in, BitOutputStream out){
+
+		int bits = in.readBits(BITS_PER_INT);
+		if (bits != HUFF_TREE) {
+			throw new HuffException("illegal header starts with " + bits);
+		}
+		HuffNode root = readTreeHeader(in);
+		readCompressedBits(root, in, out);
+		out.close();
+	}
+	
+	/**
+	 * reads the compressed bits using a trie
+	 * @param root
+	 * 				the root of a trie
+	 * @param in
+	 * 				Buffered bit stream of the file to be decompressed.
+	 * @param out
+	 * 				Buffered bit stream writing to the output file.
+	 */
+	private void readCompressedBits(HuffNode root, BitInputStream in, BitOutputStream out) {
 		HuffNode current = root; 
 		   while (true) {
 		       int bits = in.readBits(1);
@@ -55,7 +216,14 @@ public class HuffProcessor {
 		   }
 	}
 	
-	public HuffNode readTreeHeader(BitInputStream in) {
+	/**
+	 * Reads the tree header to create a trie
+	 * @param in
+	 * 				Buffered bit stream of the file to be decompressed.
+	 * @return
+	 * 				The head of the trie
+	 */
+	private HuffNode readTreeHeader(BitInputStream in) {
 		int bit = in.readBits(1);
 		if (bit == -1) throw new HuffException("-1 bit read");
 		if (bit == 0) {
@@ -69,40 +237,5 @@ public class HuffProcessor {
 		}
 	}
 	
-	/**
-	 * Compresses a file. Process must be reversible and loss-less.
-	 *
-	 * @param in
-	 *            Buffered bit stream of the file to be compressed.
-	 * @param out
-	 *            Buffered bit stream writing to the output file.
-	 */
-	public void compress(BitInputStream in, BitOutputStream out){
-
-		while (true){
-			int val = in.readBits(BITS_PER_WORD);
-			if (val == -1) break;
-			out.writeBits(BITS_PER_WORD, val);
-		}
-		out.close();
-	}
-	/**
-	 * Decompresses a file. Output file must be identical bit-by-bit to the
-	 * original.
-	 *
-	 * @param in
-	 *            Buffered bit stream of the file to be decompressed.
-	 * @param out
-	 *            Buffered bit stream writing to the output file.
-	 */
-	public void decompress(BitInputStream in, BitOutputStream out){
-
-		int bits = in.readBits(BITS_PER_INT);
-		if (bits != HUFF_TREE) {
-			throw new HuffException("illegal header starts with " + bits);
-		}
-		HuffNode root = readTreeHeader(in);
-		readCompressedBits(root, in, out);
-		out.close();
-	}
+	
 }
