@@ -80,11 +80,11 @@ public class HuffProcessor {
 	 */
 	private void writeHeader(HuffNode root, BitOutputStream out) {
 		if (root.myLeft == null && root.myRight == null) {
-			out.write(1);
+			out.writeBits(1, 1);
 			out.writeBits(BITS_PER_WORD + 1, root.myValue);
 		}
 		else {
-			out.write(0);
+			out.writeBits(1, 0);
 			writeHeader(root.myLeft, out);
 			writeHeader(root.myRight, out);
 		}
